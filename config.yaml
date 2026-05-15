@@ -1,0 +1,30 @@
+base_url: "https://vcs-sw2.arcadyan.com.tw"
+group: "kpn/v16-compact/guangzhou_gitlab_mirror"
+since: "2026-04-21"
+until: "2026-05-14"
+timezone: "Asia/Taipei"
+
+overview:
+  team: "Hsinchu Team"
+  group_path: "KPN/V16 Compact/Guangzhou_GitLab_mirror"
+  group_url: "https://vcs-sw2.arcadyan.com.tw/kpn/v16-compact/guangzhou_gitlab_mirror"
+
+repositories:
+  - path: "prplos"
+    branches:
+      - name: "arc-hsinchu/kpn-v16-compact"
+        base_commit: "2634d949"
+      - name: "arc-hsinchu/dev-kpn-v16-compact_2026.05.15"
+        base_commit: "c4b31665"
+  - path: "feeds/feed-qca"
+    branches:
+      - name: "arc-hsinchu/kpn-v16-compact"
+        base_commit: "36178df1"
+      - name: "arc-hsinchu/dev-kpn-v16-compact_2026.05.15"
+        base_commit: "25121e14"
+  - path: "feeds/sah/feed_arcadyan"
+    branches:
+      - name: "arc-hsinchu/kpn-v16-compact"
+        base_commit: "71d0e995"
+      - name: "arc-hsinchu/dev-kpn-v16-compact_2026.05.15"
+        base_commit: "649f07fe"
