@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import sys
@@ -39,7 +38,7 @@ class RepositoryConfig:
 
 @dataclass(frozen=True)
 class ReportConfig:
-    """Configuration loaded from --config file. CLI arguments override these values."""
+    """Configuration loaded from the positional YAML config file."""
     # CLI settings (can be overridden by command line)
     base_url: str = ""
     group: str = ""
@@ -76,25 +75,11 @@ class ProjectActivity:
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(
-        description="Collect branch commit activity from a GitLab group and render Markdown."
+        description="Generate a Markdown repository news report from a YAML config."
     )
     parser.add_argument(
-        "--config",
-        help="Path to YAML or JSON config file. CLI arguments override config values.",
-    )
-    parser.add_argument("--base-url", help="GitLab base URL, e.g. https://gitlab.example.com")
-    parser.add_argument("--group", help="GitLab group ID or full path")
-    parser.add_argument(
-        "--branch",
-        action="append",
-        dest="branches",
-        help="Exact branch name to inspect (can be specified multiple times)",
-    )
-    parser.add_argument("--since", help="Start timestamp/date in ISO format")
-    parser.add_argument("--until", help="End timestamp/date in ISO format")
-    parser.add_argument(
-        "--timezone",
-        help="IANA timezone for report rendering, default: Asia/Taipei",
+        "config_path",
+        help="Path to the YAML config file.",
     )
     parser.add_argument(
         "--output",
@@ -117,16 +102,15 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 def load_config(config_path: str | None) -> ReportConfig:
     if not config_path:
         return ReportConfig()
+    if not config_path.endswith((".yaml", ".yml")):
+        raise GitLabReporterError("Config file must be YAML (.yaml or .yml)")
     with open(config_path, encoding="utf-8") as handle:
         content = handle.read()
-    if config_path.endswith(".yaml") or config_path.endswith(".yml"):
-        if not HAS_YAML:
-            raise GitLabReporterError("PyYAML is required to load YAML config files (pip install pyyaml)")
-        data = yaml.safe_load(content)
-    else:
-        data = json.loads(content)
+    if not HAS_YAML:
+        raise GitLabReporterError("PyYAML is required to load YAML config files (pip install pyyaml)")
+    data = yaml.safe_load(content)
     if not isinstance(data, dict):
-        raise GitLabReporterError("Config file must contain a JSON/YAML object")
+        raise GitLabReporterError("Config file must contain a YAML object")
     overview = data.get("overview", {})
     dev_branches = data.get("development_branch_list", [])
     branches_raw = data.get("branches", [])
@@ -165,37 +149,18 @@ def load_config(config_path: str | None) -> ReportConfig:
     )
 
 
-def merge_config_and_args(config: ReportConfig, args: argparse.Namespace) -> argparse.Namespace:
-    """Merge config file values with CLI arguments. CLI arguments take precedence."""
-    if not args.base_url and config.base_url:
-        args.base_url = config.base_url
-    if not args.group and config.group:
-        args.group = config.group
-    if not args.branches and config.branches:
-        args.branches = list(config.branches)
-    if not args.since and config.since:
-        args.since = config.since
-    if not args.until and config.until:
-        args.until = config.until
-    if not args.timezone and config.timezone:
-        args.timezone = config.timezone
-    elif not args.timezone:
-        args.timezone = "Asia/Taipei"
-    return args
-
-
 def validate_required_args(args: argparse.Namespace, *, require_branches: bool = True) -> None:
     """Validate that all required arguments are present after merging config."""
     missing = []
-    if not args.base_url:
+    if not getattr(args, "base_url", ""):
         missing.append("--base-url")
-    if not args.group:
+    if not getattr(args, "group", ""):
         missing.append("--group")
-    if require_branches and not args.branches:
+    if require_branches and not getattr(args, "branches", None):
         missing.append("--branch")
-    if not args.since:
+    if not getattr(args, "since", ""):
         missing.append("--since")
-    if not args.until:
+    if not getattr(args, "until", ""):
         missing.append("--until")
     if missing:
         raise GitLabReporterError(f"Missing required arguments: {', '.join(missing)}")
@@ -704,8 +669,13 @@ def write_output(markdown: str, output_path: str, *, also_stdout: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv)
-    config = load_config(args.config)
-    args = merge_config_and_args(config, args)
+    config = load_config(args.config_path)
+    args.base_url = config.base_url
+    args.group = config.group
+    args.branches = list(config.branches)
+    args.since = config.since
+    args.until = config.until
+    args.timezone = config.timezone or "Asia/Taipei"
     validate_required_args(args, require_branches=not bool(config.repositories))
     token = load_token()
     timezone = ZoneInfo(args.timezone)

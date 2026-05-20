@@ -1,10 +1,10 @@
-# GitLab Branch News Reporter
+# Repo News Report
 
-Generate a Markdown report for selected GitLab repositories and branches.
+Generate a Markdown news report for selected GitLab repositories and branches.
+The tool reads a YAML config, compares each configured `base_commit` to the
+branch tip, and includes the base commit as the first row in each branch table.
 
-The current default mode uses `config.yaml`. For each repository branch, the tool compares a configured `base_commit` to the branch tip and includes the base commit as the first row.
-
-## Setup
+## Quick Start
 
 Install dependencies:
 
@@ -12,116 +12,111 @@ Install dependencies:
 python3 -m pip install requests pyyaml
 ```
 
-Set your GitLab token:
+Set a GitLab token with read access to the target group and repositories:
 
 ```bash
 export GITLAB_TOKEN="your_gitlab_token"
 ```
 
-The token must be able to read the target GitLab group and repositories.
-
-## Run
-
-Use the checked-in config:
+Run the report:
 
 ```bash
-python3 gitlab_branch_news.py --config config.yaml
+./repo-news-report.py config.yaml
 ```
 
-By default, the report is written to:
+By default, output is written to `report/<year>_W<week>_<mmdd>_<HHMMSS>.md`
+using the computer's current local time for the filename.
 
-```text
-report/<year>_W<week>_<mmdd>_<HHMMSS>.md
-```
-
-The filename uses the computer's current local time when the script runs.
+## Common Commands
 
 Write to a specific file:
 
 ```bash
-python3 gitlab_branch_news.py --config config.yaml --output report/latest.md
+./repo-news-report.py config.yaml --output report/latest.md
 ```
 
-Also print the report to the terminal:
+Also print the generated report:
 
 ```bash
-python3 gitlab_branch_news.py --config config.yaml --stdout
+./repo-news-report.py config.yaml --stdout
 ```
 
-For an internal certificate:
+Use an internal certificate bundle:
 
 ```bash
-python3 gitlab_branch_news.py --config config.yaml --ca-bundle /path/to/company-ca.pem
+./repo-news-report.py config.yaml --ca-bundle /path/to/company-ca.pem
 ```
 
-For a temporary internal run without TLS verification:
+Temporarily skip TLS verification for an internal run:
 
 ```bash
-python3 gitlab_branch_news.py --config config.yaml --insecure
+./repo-news-report.py config.yaml --insecure
 ```
 
-## Config
+Run tests:
 
-`config.yaml` contains:
+```bash
+python3 -m unittest discover -s tests -v
+```
+
+## Generate a Config
+
+Create a YAML config in one command with `gen-config.py`:
+
+```bash
+./gen-config.py \
+  --output config.yaml \
+  --base-url https://vcs-sw2.arcadyan.com.tw \
+  --group kpn/v16-compact/guangzhou_gitlab_mirror \
+  --since 2026-04-21 \
+  --until 2026-05-14 \
+  --timezone Asia/Taipei \
+  --team "Hsinchu Team" \
+  --group-path "KPN/V16 Compact/Guangzhou_GitLab_mirror" \
+  --group-url https://vcs-sw2.arcadyan.com.tw/kpn/v16-compact/guangzhou_gitlab_mirror \
+  --repo-branch prplos:arc-hsinchu/kpn-v16-compact=2634d949 \
+  --repo-branch feeds/feed-qca:arc-hsinchu/dev-kpn-v16-compact_2026.05.15=25121e14
+```
+
+Repeat `--repo-branch REPO_PATH:BRANCH_NAME=BASE_COMMIT` for every branch.
+Entries with the same repository path are grouped automatically.
+
+## Config Format
+
+`config.yaml` must be YAML and includes:
 
 - `base_url`: GitLab server URL
 - `group`: GitLab group path
-- `timezone`: timezone used in the report
-- `overview`: text shown in the report overview
-- `repositories`: repositories, branches, and base commits to report
+- `since` / `until`: report date window
+- `timezone`: IANA timezone used in the report
+- `overview`: optional report overview fields
+- `repositories`: repositories, branches, and base commits to compare
 
-Example repository entry:
+Example:
 
 ```yaml
+base_url: "https://vcs-sw2.arcadyan.com.tw"
+group: "kpn/v16-compact/guangzhou_gitlab_mirror"
+since: "2026-04-21"
+until: "2026-05-14"
+timezone: "Asia/Taipei"
+
+overview:
+  team: "Hsinchu Team"
+  group_path: "KPN/V16 Compact/Guangzhou_GitLab_mirror"
+  group_url: "https://vcs-sw2.arcadyan.com.tw/kpn/v16-compact/guangzhou_gitlab_mirror"
+
 repositories:
   - path: "prplos"
     branches:
       - name: "arc-hsinchu/kpn-v16-compact"
         base_commit: "2634d949"
-      - name: "arc-hsinchu/dev-kpn-v16-compact_2026.05.15"
-        base_commit: "c4b31665"
 ```
 
-## Output
+## Report Output
 
-The report includes:
-
-- sync date
-- GitLab group overview
-- one section per repository
-- a base commit table for each repository
-- one commit table per configured branch
-
-Commit table fields:
-
-- `Year`, `Week`, `Date`: commit date in the configured timezone
-- `Commit`: short SHA
-- `Link`: GitLab commit link
-- `Tag`: tags on the commit, or `-`
-- `Breif`: commit title
-
-`Breif` is intentionally spelled this way to match the requested report format.
-
-## Legacy Mode
-
-The script still supports the old CLI mode:
-
-```bash
-python3 gitlab_branch_news.py \
-  --base-url https://vcs-sw2.arcadyan.com.tw \
-  --group kpn/v16-compact/guangzhou_gitlab_mirror \
-  --branch arc-hsinchu/kpn-v16-compact \
-  --since 2026-05-05 \
-  --until 2026-05-13 \
-  --timezone Asia/Taipei
-```
-
-Legacy mode scans projects in the group and collects commits in the date window.
-
-## Tests
-
-Run:
-
-```bash
-python3 -m unittest discover -s tests -v
-```
+The report includes a sync date, GitLab group overview, one section per
+repository, a base commit table, and a commit table for each configured branch.
+Commit rows show `Year`, `Week`, `Date`, short commit SHA, GitLab link, tag, and
+`Breif`. `Breif` is intentionally spelled that way to match the requested report
+format.

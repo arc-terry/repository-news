@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import io
-import json
+import importlib.util
 import os
 import tempfile
 import unittest
@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import requests
 
-from gitlab_branch_news import (
+from repo_news_report import (
     BranchConfig,
     CommitEntry,
     GitLabClient,
@@ -26,7 +26,6 @@ from gitlab_branch_news import (
     format_short_date,
     format_week_count,
     load_config,
-    merge_config_and_args,
     parse_args,
     parse_user_datetime,
     project_relative_path,
@@ -34,6 +33,15 @@ from gitlab_branch_news import (
     validate_required_args,
     write_output,
 )
+
+
+def load_gen_config_module():
+    module_path = os.path.join(os.path.dirname(__file__), "..", "gen-config.py")
+    spec = importlib.util.spec_from_file_location("gen_config_script", module_path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec and spec.loader
+    spec.loader.exec_module(module)
+    return module
 
 
 class FakeResponse:
@@ -90,7 +98,7 @@ class FormattingTests(unittest.TestCase):
             "feeds/sah/feed_arcadyan",
         )
 
-    @patch("gitlab_branch_news.datetime")
+    @patch("repo_news_report.datetime")
     def test_default_output_path_uses_current_computer_time(self, datetime_mock):
         datetime_mock.now.return_value = datetime(2026, 5, 15, 17, 31, 45)
 
@@ -295,7 +303,7 @@ class MarkdownRenderTests(unittest.TestCase):
         self.assertNotIn("| Branch |", rendered)
         self.assertIn("| 0 | 2026 | W19 | 0506 | 9afbd00d | [link](https://gitlab/prplos/-/commit/9afbd00df86cde8dab9f01524868efcfbc0b2239) | v1.0 | profile: kpn_v16_compact replaces upstream git server url for hsinchu development |", rendered)
 
-    @patch("gitlab_branch_news.datetime")
+    @patch("repo_news_report.datetime")
     def test_render_markdown_matches_configured_expected_shape(self, datetime_mock):
         datetime_mock.now.return_value = datetime(2026, 5, 14, 9, 31, tzinfo=UTC)
         datetime_mock.fromisoformat.side_effect = datetime.fromisoformat
@@ -380,38 +388,47 @@ class MarkdownRenderTests(unittest.TestCase):
 
 
 class MainFlowTests(unittest.TestCase):
-    @patch("gitlab_branch_news.load_token", return_value="token")
-    @patch("gitlab_branch_news.default_output_path", return_value="report/current-time.md")
-    @patch("gitlab_branch_news.collect_activity")
-    @patch("gitlab_branch_news.write_output")
-    @patch("gitlab_branch_news.GitLabClient")
+    @patch("repo_news_report.load_token", return_value="token")
+    @patch("repo_news_report.default_output_path", return_value="report/current-time.md")
+    @patch("repo_news_report.collect_configured_activity")
+    @patch("repo_news_report.write_output")
+    @patch("repo_news_report.GitLabClient")
     def test_main_builds_client_with_ca_bundle(
         self,
         client_cls,
         write_output_mock,
-        collect_activity_mock,
+        collect_configured_activity_mock,
         default_output_path_mock,
         _load_token,
     ):
-        from gitlab_branch_news import main
+        from repo_news_report import main
 
-        collect_activity_mock.return_value = ("Group Name Group", [])
-        exit_code = main(
-            [
-                "--base-url",
-                "https://gitlab.example.com",
-                "--group",
-                "my-group",
-                "--branch",
-                "feature/test",
-                "--since",
-                "2026-05-01",
-                "--until",
-                "2026-05-31",
-                "--ca-bundle",
-                "/tmp/ca.pem",
-            ]
-        )
+        collect_configured_activity_mock.return_value = []
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as config_file:
+            config_file.write(
+                "base_url: https://gitlab.example.com\n"
+                "group: my-group\n"
+                "since: 2026-05-01\n"
+                "until: 2026-05-31\n"
+                "timezone: UTC\n"
+                "repositories:\n"
+                "  - path: prplos\n"
+                "    branches:\n"
+                "      - name: feature/test\n"
+                "        base_commit: abc12345\n"
+            )
+            config_file.flush()
+            config_path = config_file.name
+        try:
+            exit_code = main(
+                [
+                    config_path,
+                    "--ca-bundle",
+                    "/tmp/ca.pem",
+                ]
+            )
+        finally:
+            os.unlink(config_path)
 
         self.assertEqual(exit_code, 0)
         client_cls.assert_called_once_with("https://gitlab.example.com", "token", verify="/tmp/ca.pem")
@@ -423,46 +440,32 @@ class MainFlowTests(unittest.TestCase):
         )
         self.assertFalse(write_output_mock.call_args.kwargs["also_stdout"])
 
-    @patch("gitlab_branch_news.load_token", return_value="token")
-    @patch("gitlab_branch_news.collect_activity")
-    @patch("gitlab_branch_news.write_output")
-    @patch("gitlab_branch_news.GitLabClient")
-    def test_main_passes_multiple_branches(self, client_cls, write_output_mock, collect_activity_mock, _load_token):
-        from gitlab_branch_news import main
+    def test_parse_args_requires_positional_config_path(self):
+        args = parse_args(["config.yaml", "--output", "report/latest.md", "--stdout"])
+        self.assertEqual(args.config_path, "config.yaml")
+        self.assertEqual(args.output, "report/latest.md")
+        self.assertTrue(args.stdout)
 
-        collect_activity_mock.return_value = ("Group Name Group", [])
-        main(
-            [
-                "--base-url",
-                "https://gitlab.example.com",
-                "--group",
-                "my-group",
-                "--branch",
-                "feature/test",
-                "--branch",
-                "feature/test2",
-                "--since",
-                "2026-05-01",
-                "--until",
-                "2026-05-31",
-            ]
-        )
-
-        call_kwargs = collect_activity_mock.call_args.kwargs
-        self.assertEqual(call_kwargs["branches"], ["feature/test", "feature/test2"])
+    def test_parse_args_rejects_legacy_report_flags(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--config", "config.yaml"])
+        with self.assertRaises(SystemExit):
+            parse_args(["config.yaml", "--base-url", "https://gitlab.example.com"])
 
 
 class ConfigFirstTests(unittest.TestCase):
     def test_load_config_extracts_cli_settings(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({
-                "base_url": "https://gitlab.config.com",
-                "group": "config-group",
-                "branches": ["main", "develop"],
-                "since": "2026-01-01",
-                "until": "2026-01-31",
-                "timezone": "UTC",
-            }, f)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(
+                "base_url: https://gitlab.config.com\n"
+                "group: config-group\n"
+                "branches:\n"
+                "  - main\n"
+                "  - develop\n"
+                "since: 2026-01-01\n"
+                "until: 2026-01-31\n"
+                "timezone: UTC\n"
+            )
             f.flush()
             config = load_config(f.name)
         os.unlink(f.name)
@@ -474,22 +477,20 @@ class ConfigFirstTests(unittest.TestCase):
         self.assertEqual(config.timezone, "UTC")
 
     def test_load_config_extracts_repositories(self):
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
-            json.dump({
-                "base_url": "https://gitlab.config.com",
-                "group": "config-group",
-                "since": "2026-01-01",
-                "until": "2026-01-31",
-                "repositories": [
-                    {
-                        "path": "prplos",
-                        "branches": [
-                            {"name": "arc-hsinchu/kpn-v16-compact", "base_commit": "2634d949"},
-                            {"name": "arc-hsinchu/dev-kpn-v16-compact_2026.05.15", "base_commit": "c4b31665"},
-                        ],
-                    }
-                ],
-            }, f)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as f:
+            f.write(
+                "base_url: https://gitlab.config.com\n"
+                "group: config-group\n"
+                "since: 2026-01-01\n"
+                "until: 2026-01-31\n"
+                "repositories:\n"
+                "  - path: prplos\n"
+                "    branches:\n"
+                "      - name: arc-hsinchu/kpn-v16-compact\n"
+                "        base_commit: 2634d949\n"
+                "      - name: arc-hsinchu/dev-kpn-v16-compact_2026.05.15\n"
+                "        base_commit: c4b31665\n"
+            )
             f.flush()
             config = load_config(f.name)
         os.unlink(f.name)
@@ -500,48 +501,68 @@ class ConfigFirstTests(unittest.TestCase):
             BranchConfig("arc-hsinchu/dev-kpn-v16-compact_2026.05.15", "c4b31665"),
         )
 
-    def test_cli_args_override_config_values(self):
-        config = ReportConfig(
-            base_url="https://config.example.com",
-            group="config-group",
-            branches=("config-branch",),
-            since="2026-01-01",
-            until="2026-01-31",
-            timezone="UTC",
-        )
-        args = parse_args([
-            "--base-url", "https://cli.example.com",
-            "--group", "cli-group",
-        ])
-        merged = merge_config_and_args(config, args)
-        self.assertEqual(merged.base_url, "https://cli.example.com")
-        self.assertEqual(merged.group, "cli-group")
-        self.assertEqual(merged.branches, ["config-branch"])
-        self.assertEqual(merged.since, "2026-01-01")
-        self.assertEqual(merged.until, "2026-01-31")
-
-    def test_config_values_used_when_cli_args_missing(self):
-        config = ReportConfig(
-            base_url="https://config.example.com",
-            group="config-group",
-            branches=("config-branch",),
-            since="2026-01-01",
-            until="2026-01-31",
-            timezone="Europe/London",
-        )
-        args = parse_args([])
-        merged = merge_config_and_args(config, args)
-        self.assertEqual(merged.base_url, "https://config.example.com")
-        self.assertEqual(merged.group, "config-group")
-        self.assertEqual(merged.branches, ["config-branch"])
-        self.assertEqual(merged.timezone, "Europe/London")
+    def test_load_config_rejects_non_yaml_files(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+            f.write("{}")
+            f.flush()
+            config_path = f.name
+        try:
+            with self.assertRaises(Exception) as ctx:
+                load_config(config_path)
+            self.assertIn("YAML", str(ctx.exception))
+        finally:
+            os.unlink(config_path)
 
     def test_validate_required_args_raises_for_missing(self):
-        args = parse_args([])
+        args = parse_args(["config.yaml"])
         with self.assertRaises(Exception) as ctx:
             validate_required_args(args)
         self.assertIn("--base-url", str(ctx.exception))
         self.assertIn("--group", str(ctx.exception))
+
+
+class GenConfigTests(unittest.TestCase):
+    def test_gen_config_groups_repo_branch_entries(self):
+        gen_config = load_gen_config_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "config.yaml")
+            exit_code = gen_config.main([
+                "--output", output_path,
+                "--base-url", "https://gitlab.example.com",
+                "--group", "team/group",
+                "--since", "2026-05-01",
+                "--until", "2026-05-20",
+                "--timezone", "Asia/Taipei",
+                "--team", "Hsinchu Team",
+                "--group-path", "Team/Group",
+                "--group-url", "https://gitlab.example.com/team/group",
+                "--repo-branch", "prplos:main=abc12345",
+                "--repo-branch", "prplos:develop=def67890",
+                "--repo-branch", "feeds/feed-qca:main=11112222",
+            ])
+
+            self.assertEqual(exit_code, 0)
+            config = load_config(output_path)
+            self.assertEqual(config.base_url, "https://gitlab.example.com")
+            self.assertEqual(config.group, "team/group")
+            self.assertEqual(config.team, "Hsinchu Team")
+            self.assertEqual(config.group_url, "https://gitlab.example.com/team/group")
+            self.assertEqual([repo.path for repo in config.repositories], ["prplos", "feeds/feed-qca"])
+            self.assertEqual(config.repositories[0].branches[0], BranchConfig("main", "abc12345"))
+            self.assertEqual(config.repositories[0].branches[1], BranchConfig("develop", "def67890"))
+
+    def test_gen_config_rejects_invalid_repo_branch_syntax(self):
+        gen_config = load_gen_config_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            with self.assertRaises(SystemExit):
+                gen_config.main([
+                    "--output", os.path.join(temp_dir, "config.yaml"),
+                    "--base-url", "https://gitlab.example.com",
+                    "--group", "team/group",
+                    "--since", "2026-05-01",
+                    "--until", "2026-05-20",
+                    "--repo-branch", "missing-separators",
+                ])
 
 
 if __name__ == "__main__":
