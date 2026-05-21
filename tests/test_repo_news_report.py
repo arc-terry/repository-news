@@ -440,6 +440,45 @@ class MainFlowTests(unittest.TestCase):
         )
         self.assertFalse(write_output_mock.call_args.kwargs["also_stdout"])
 
+    @patch("repo_news_report.load_token", return_value="token")
+    @patch("repo_news_report.default_output_path", return_value="report/current-time.md")
+    @patch("repo_news_report.collect_configured_activity")
+    @patch("repo_news_report.write_output")
+    @patch("repo_news_report.GitLabClient")
+    def test_main_accepts_configured_report_without_date_bounds(
+        self,
+        client_cls,
+        write_output_mock,
+        collect_configured_activity_mock,
+        _default_output_path_mock,
+        _load_token,
+    ):
+        from repo_news_report import main
+
+        collect_configured_activity_mock.return_value = []
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".yaml", delete=False) as config_file:
+            config_file.write(
+                "base_url: https://gitlab.example.com\n"
+                "group: my-group\n"
+                "timezone: UTC\n"
+                "repositories:\n"
+                "  - path: prplos\n"
+                "    branches:\n"
+                "      - name: feature/test\n"
+                "        base_commit: abc12345\n"
+            )
+            config_file.flush()
+            config_path = config_file.name
+        try:
+            exit_code = main([config_path])
+        finally:
+            os.unlink(config_path)
+
+        self.assertEqual(exit_code, 0)
+        client_cls.assert_called_once_with("https://gitlab.example.com", "token", verify=True)
+        collect_configured_activity_mock.assert_called_once()
+        write_output_mock.assert_called_once()
+
     def test_parse_args_requires_positional_config_path(self):
         args = parse_args(["config.yaml", "--output", "report/latest.md", "--stdout"])
         self.assertEqual(args.config_path, "config.yaml")
@@ -550,6 +589,26 @@ class GenConfigTests(unittest.TestCase):
             self.assertEqual([repo.path for repo in config.repositories], ["prplos", "feeds/feed-qca"])
             self.assertEqual(config.repositories[0].branches[0], BranchConfig("main", "abc12345"))
             self.assertEqual(config.repositories[0].branches[1], BranchConfig("develop", "def67890"))
+
+    def test_gen_config_omits_date_bounds_when_not_provided(self):
+        gen_config = load_gen_config_module()
+        with tempfile.TemporaryDirectory() as temp_dir:
+            output_path = os.path.join(temp_dir, "config.yaml")
+            exit_code = gen_config.main([
+                "--output", output_path,
+                "--base-url", "https://gitlab.example.com",
+                "--group", "team/group",
+                "--repo-branch", "prplos:main=abc12345",
+            ])
+
+            self.assertEqual(exit_code, 0)
+            config = load_config(output_path)
+            self.assertEqual(config.since, "")
+            self.assertEqual(config.until, "")
+            with open(output_path, encoding="utf-8") as handle:
+                content = handle.read()
+            self.assertNotIn("since:", content)
+            self.assertNotIn("until:", content)
 
     def test_gen_config_rejects_invalid_repo_branch_syntax(self):
         gen_config = load_gen_config_module()

@@ -158,9 +158,10 @@ def validate_required_args(args: argparse.Namespace, *, require_branches: bool =
         missing.append("--group")
     if require_branches and not getattr(args, "branches", None):
         missing.append("--branch")
-    if not getattr(args, "since", ""):
+    require_date_bounds = require_branches
+    if require_date_bounds and not getattr(args, "since", ""):
         missing.append("--since")
-    if not getattr(args, "until", ""):
+    if require_date_bounds and not getattr(args, "until", ""):
         missing.append("--until")
     if missing:
         raise GitLabReporterError(f"Missing required arguments: {', '.join(missing)}")
@@ -679,16 +680,16 @@ def main(argv: list[str] | None = None) -> int:
     validate_required_args(args, require_branches=not bool(config.repositories))
     token = load_token()
     timezone = ZoneInfo(args.timezone)
-    since = parse_user_datetime(args.since, end_of_day=False)
-    until = parse_user_datetime(args.until, end_of_day=True)
-    if since > until:
-        raise GitLabReporterError("--since must be earlier than or equal to --until")
     client = GitLabClient(args.base_url, token, verify=make_verify_setting(args))
     if config.repositories:
         group_title = f"{config.group_path} Group" if config.group_path else f"{args.group} Group"
         projects = collect_configured_activity(client, config=config, stderr=sys.stderr)
         markdown = render_markdown(group_title, projects, timezone, config=config, configured=True)
     else:
+        since = parse_user_datetime(args.since, end_of_day=False)
+        until = parse_user_datetime(args.until, end_of_day=True)
+        if since > until:
+            raise GitLabReporterError("--since must be earlier than or equal to --until")
         group_title, projects = collect_activity(
             client,
             group=args.group,

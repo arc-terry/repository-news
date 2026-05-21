@@ -29,8 +29,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--output", required=True, help="Path to write the generated YAML config.")
     parser.add_argument("--base-url", required=True, help="GitLab base URL, e.g. https://gitlab.example.com")
     parser.add_argument("--group", required=True, help="GitLab group path.")
-    parser.add_argument("--since", required=True, help="Start date or timestamp.")
-    parser.add_argument("--until", required=True, help="End date or timestamp.")
+    parser.add_argument("--since", help="Optional start date or timestamp.")
+    parser.add_argument("--until", help="Optional end date or timestamp.")
     parser.add_argument("--timezone", default="Asia/Taipei", help="IANA timezone, default: Asia/Taipei.")
     parser.add_argument("--team", default="", help="Team label for the report overview.")
     parser.add_argument("--group-path", default="", help="Display name for the GitLab group.")
@@ -54,10 +54,12 @@ def build_config(args: argparse.Namespace) -> dict:
     config = {
         "base_url": args.base_url,
         "group": args.group,
-        "since": args.since,
-        "until": args.until,
         "timezone": args.timezone,
     }
+    if args.since:
+        config["since"] = args.since
+    if args.until:
+        config["until"] = args.until
     overview = {}
     if args.team:
         overview["team"] = args.team

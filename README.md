@@ -68,8 +68,6 @@ Create a YAML config in one command with `gen-config.py`:
   --output config.yaml \
   --base-url https://vcs-sw2.arcadyan.com.tw \
   --group kpn/v16-compact/guangzhou_gitlab_mirror \
-  --since 2026-04-21 \
-  --until 2026-05-14 \
   --timezone Asia/Taipei \
   --team "Hsinchu Team" \
   --group-path "KPN/V16 Compact/Guangzhou_GitLab_mirror" \
@@ -80,6 +78,8 @@ Create a YAML config in one command with `gen-config.py`:
 
 Repeat `--repo-branch REPO_PATH:BRANCH_NAME=BASE_COMMIT` for every branch.
 Entries with the same repository path are grouped automatically.
+You may also pass `--since` and `--until`; they are written to the config for
+reference but are not required for repository compare reports.
 
 ## Config Format
 
@@ -87,7 +87,7 @@ Entries with the same repository path are grouped automatically.
 
 - `base_url`: GitLab server URL
 - `group`: GitLab group path
-- `since` / `until`: report date window
+- `since` / `until`: optional date window metadata
 - `timezone`: IANA timezone used in the report
 - `overview`: optional report overview fields
 - `repositories`: repositories, branches, and base commits to compare
@@ -97,8 +97,6 @@ Example:
 ```yaml
 base_url: "https://vcs-sw2.arcadyan.com.tw"
 group: "kpn/v16-compact/guangzhou_gitlab_mirror"
-since: "2026-04-21"
-until: "2026-05-14"
 timezone: "Asia/Taipei"
 
 overview:

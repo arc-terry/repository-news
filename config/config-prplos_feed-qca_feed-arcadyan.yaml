@@ -1,7 +1,5 @@
 base_url: "https://vcs-sw2.arcadyan.com.tw"
 group: "kpn/v16-compact/guangzhou_gitlab_mirror"
-since: "2026-04-21"
-until: "2026-05-14"
 timezone: "Asia/Taipei"
 
 overview:
