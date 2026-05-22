@@ -3,3 +3,4 @@ __pycache__/
 .git-repo/
 .worktrees/
 report
+config/
