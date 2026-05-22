@@ -270,6 +270,87 @@ class GitLabCollectionTests(unittest.TestCase):
         self.assertEqual(projects[0].commits[1].branch, "-")
         self.assertEqual(projects[0].commits[2].tags, ("v1.0",))
 
+    def test_collect_configured_activity_detects_base_commit_from_base_ref(self):
+        responses = [
+            FakeResponse(
+                200,
+                {
+                    "id": 10,
+                    "path_with_namespace": "kpn/v16-compact/guangzhou_gitlab_mirror/prplos",
+                },
+            ),
+            FakeResponse(200, {"name": "arc-hsinchu/kpn-v16-compact", "commit": {"id": "b9ec6a1a9999"}}),
+            FakeResponse(
+                200,
+                {
+                    "id": "2634d9491111",
+                    "title": "profile: computed base commit",
+                    "committed_date": "2026-04-29T01:00:00Z",
+                    "web_url": "https://gitlab/prplos/-/commit/2634d9491111",
+                },
+            ),
+            FakeResponse(
+                200,
+                {
+                    "commits": [
+                        {
+                            "id": "9afbd00d2222",
+                            "title": "profile: next commit",
+                            "committed_date": "2026-05-06T02:00:00Z",
+                            "web_url": "https://gitlab/prplos/-/commit/9afbd00d2222",
+                        }
+                    ]
+                },
+            ),
+            FakeResponse(200, []),
+            FakeResponse(200, [{"name": "sah/kpn-v16-compact", "type": "branch"}]),
+            FakeResponse(200, [{"name": "arc-hsinchu/kpn-v16-compact", "type": "branch"}]),
+        ]
+        session = FakeSession(responses)
+        client = GitLabClient("https://gitlab.example.com", "token", verify=False, session=session)
+        config = ReportConfig(
+            group="kpn/v16-compact/guangzhou_gitlab_mirror",
+            repositories=(
+                RepositoryConfig(
+                    path="prplos",
+                    branches=(
+                        BranchConfig(
+                            name="arc-hsinchu/kpn-v16-compact",
+                            base_commit="stale-manual-value",
+                            base_ref="sah/kpn-v16-compact",
+                        ),
+                    ),
+                ),
+            ),
+        )
+
+        projects = collect_configured_activity(client, config=config, stderr=io.StringIO())
+
+        self.assertEqual(projects[0].base_commit, "2634d949")
+        self.assertEqual([commit.sha for commit in projects[0].commits], ["2634d9491111", "9afbd00d2222"])
+        merge_base_calls = [call for call in session.calls if call["url"].endswith("/repository/merge_base")]
+        self.assertEqual(merge_base_calls[0]["params"], {"refs[]": ["sah/kpn-v16-compact", "arc-hsinchu/kpn-v16-compact"]})
+
+    def test_get_merge_base_returns_commit_payload(self):
+        session = FakeSession(
+            [
+                FakeResponse(
+                    200,
+                    {
+                        "id": "2634d9491111",
+                        "title": "profile: computed base commit",
+                    },
+                )
+            ]
+        )
+        client = GitLabClient("https://gitlab.example.com", "token", verify=False, session=session)
+
+        result = client.get_merge_base(10, ("main", "feature/test"))
+
+        self.assertEqual(result["id"], "2634d9491111")
+        self.assertEqual(session.calls[0]["url"], "https://gitlab.example.com/api/v4/projects/10/repository/merge_base")
+        self.assertEqual(session.calls[0]["params"], {"refs[]": ["main", "feature/test"]})
+
 
 class MarkdownRenderTests(unittest.TestCase):
     def test_render_markdown_matches_expected_shape(self):
@@ -526,7 +607,7 @@ class ConfigFirstTests(unittest.TestCase):
                 "  - path: prplos\n"
                 "    branches:\n"
                 "      - name: arc-hsinchu/kpn-v16-compact\n"
-                "        base_commit: 2634d949\n"
+                "        base_ref: sah/kpn-v16-compact\n"
                 "      - name: arc-hsinchu/dev-kpn-v16-compact_2026.05.15\n"
                 "        base_commit: c4b31665\n"
             )
@@ -534,7 +615,10 @@ class ConfigFirstTests(unittest.TestCase):
             config = load_config(f.name)
         os.unlink(f.name)
         self.assertEqual(config.repositories[0].path, "prplos")
-        self.assertEqual(config.repositories[0].branches[0], BranchConfig("arc-hsinchu/kpn-v16-compact", "2634d949"))
+        self.assertEqual(
+            config.repositories[0].branches[0],
+            BranchConfig("arc-hsinchu/kpn-v16-compact", "", "sah/kpn-v16-compact"),
+        )
         self.assertEqual(
             config.repositories[0].branches[1],
             BranchConfig("arc-hsinchu/dev-kpn-v16-compact_2026.05.15", "c4b31665"),
@@ -587,8 +671,8 @@ class GenConfigTests(unittest.TestCase):
             self.assertEqual(config.team, "Hsinchu Team")
             self.assertEqual(config.group_url, "https://gitlab.example.com/team/group")
             self.assertEqual([repo.path for repo in config.repositories], ["prplos", "feeds/feed-qca"])
-            self.assertEqual(config.repositories[0].branches[0], BranchConfig("main", "abc12345"))
-            self.assertEqual(config.repositories[0].branches[1], BranchConfig("develop", "def67890"))
+            self.assertEqual(config.repositories[0].branches[0], BranchConfig("main", "", "abc12345"))
+            self.assertEqual(config.repositories[0].branches[1], BranchConfig("develop", "", "def67890"))
 
     def test_gen_config_omits_date_bounds_when_not_provided(self):
         gen_config = load_gen_config_module()

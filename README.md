@@ -1,7 +1,8 @@
 # Repo News Report
 
 Generate a Markdown news report for selected GitLab repositories and branches.
-The tool reads a YAML config, compares each configured `base_commit` to the
+The tool reads a YAML config, asks GitLab for the merge-base between each
+configured `base_ref` and branch, compares that computed base commit to the
 branch tip, and includes the base commit as the first row in each branch table.
 
 ## Quick Start
@@ -61,7 +62,10 @@ python3 -m unittest discover -s tests -v
 
 ## Generate a Config
 
-Create a YAML config in one command with `gen-config.py`:
+Create a YAML config in one command with `gen-config.py`. Each
+`--repo-branch` value uses the form `REPO_PATH:BRANCH_NAME=BASE_REF`, where
+`BASE_REF` is the branch or commit ref GitLab should compare against
+`BRANCH_NAME` to compute the merge-base commit.
 
 ```bash
 ./gen-config.py \
@@ -72,14 +76,22 @@ Create a YAML config in one command with `gen-config.py`:
   --team "Hsinchu Team" \
   --group-path "KPN/V16 Compact/Guangzhou_GitLab_mirror" \
   --group-url https://vcs-sw2.arcadyan.com.tw/kpn/v16-compact/guangzhou_gitlab_mirror \
-  --repo-branch prplos:arc-hsinchu/kpn-v16-compact=2634d949 \
-  --repo-branch feeds/feed-qca:arc-hsinchu/dev-kpn-v16-compact_2026.05.15=25121e14
+  --repo-branch prplos:arc-hsinchu/kpn-v16-compact=sah/kpn-v16-compact \
+  --repo-branch feeds/feed-qca:arc-hsinchu/dev-kpn-v16-compact_2026.05.15=sah/dev-kpn-v16-compact_2026.05.15
 ```
 
-Repeat `--repo-branch REPO_PATH:BRANCH_NAME=BASE_COMMIT` for every branch.
-Entries with the same repository path are grouped automatically.
+Repeat `--repo-branch` for every branch that should appear in the report.
+Entries with the same repository path are grouped automatically. The generated
+config stores `base_ref`; when the report runs, GitLab computes the base commit
+from `base_ref` and the configured branch.
 You may also pass `--since` and `--until`; they are written to the config for
 reference but are not required for repository compare reports.
+
+Then run the report from the generated config:
+
+```bash
+./repo-news-report.py config.yaml --output report/latest.md --stdout
+```
 
 ## Config Format
 
@@ -90,7 +102,7 @@ reference but are not required for repository compare reports.
 - `since` / `until`: optional date window metadata
 - `timezone`: IANA timezone used in the report
 - `overview`: optional report overview fields
-- `repositories`: repositories, branches, and base commits to compare
+- `repositories`: repositories, branches, and base refs used to detect merge-base commits
 
 Example:
 
@@ -108,8 +120,16 @@ repositories:
   - path: "prplos"
     branches:
       - name: "arc-hsinchu/kpn-v16-compact"
-        base_commit: "2634d949"
+        base_ref: "sah/kpn-v16-compact"
 ```
+
+Existing configs with `base_commit` still work as a manual fallback. When both
+`base_ref` and `base_commit` are present for a branch, `base_ref` takes
+precedence and the report uses GitLab's computed merge-base commit.
+
+You do not need to fill `base_commit` when `base_ref` is configured. The script
+automatically gets the base commit by asking GitLab for the merge-base between
+`base_ref` and the configured branch.
 
 ## Report Output
 

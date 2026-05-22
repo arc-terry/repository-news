@@ -27,7 +27,8 @@ class GitLabReporterError(RuntimeError):
 @dataclass(frozen=True)
 class BranchConfig:
     name: str
-    base_commit: str
+    base_commit: str = ""
+    base_ref: str = ""
 
 
 @dataclass(frozen=True)
@@ -128,8 +129,9 @@ def load_config(config_path: str | None) -> ReportConfig:
                     continue
                 name = str(branch_raw.get("name", branch_raw.get("branch", ""))).strip()
                 base_commit = str(branch_raw.get("base_commit", "")).strip()
-                if name and base_commit:
-                    repo_branches.append(BranchConfig(name=name, base_commit=base_commit))
+                base_ref = str(branch_raw.get("base_ref", "")).strip()
+                if name and (base_commit or base_ref):
+                    repo_branches.append(BranchConfig(name=name, base_commit=base_commit, base_ref=base_ref))
             repo_path = str(repo_raw.get("path", "")).strip("/")
             if repo_path and repo_branches:
                 repositories.append(RepositoryConfig(path=repo_path, branches=tuple(repo_branches)))
@@ -322,6 +324,15 @@ class GitLabClient:
             raise GitLabReporterError("Expected object response for commit lookup")
         return payload
 
+    def get_merge_base(self, project_id: int, refs: tuple[str, ...]) -> dict[str, Any]:
+        payload, _ = self._request_json(
+            f"/api/v4/projects/{project_id}/repository/merge_base",
+            params={"refs[]": list(refs)},
+        )
+        if not isinstance(payload, dict):
+            raise GitLabReporterError("Expected object response for merge-base lookup")
+        return payload
+
     def compare_commits(self, project_id: int, from_ref: str, to_ref: str) -> list[dict[str, Any]]:
         payload, _ = self._request_json(
             f"/api/v4/projects/{project_id}/repository/compare",
@@ -467,8 +478,12 @@ def collect_configured_activity(
                     file=stderr,
                 )
                 continue
-            base_commit = client.get_commit(project_id, branch_config.base_commit)
-            compare_commits = client.compare_commits(project_id, branch_config.base_commit, branch_config.name)
+            if branch_config.base_ref:
+                base_commit = client.get_merge_base(project_id, (branch_config.base_ref, branch_config.name))
+            else:
+                base_commit = client.get_commit(project_id, branch_config.base_commit)
+            base_commit_sha = str(base_commit["id"])
+            compare_commits = client.compare_commits(project_id, base_commit_sha, branch_config.name)
             if tag_map is None:
                 tag_map = build_tag_map(client.list_tags(project_id))
             commits_raw = [base_commit, *compare_commits]

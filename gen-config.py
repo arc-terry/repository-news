@@ -13,15 +13,15 @@ except ImportError:  # pragma: no cover - exercised only when dependency is abse
 
 def parse_repo_branch(value: str) -> tuple[str, str, str]:
     if ":" not in value or "=" not in value:
-        raise argparse.ArgumentTypeError("expected REPO_PATH:BRANCH_NAME=BASE_COMMIT")
+        raise argparse.ArgumentTypeError("expected REPO_PATH:BRANCH_NAME=BASE_REF")
     repo_path, branch_and_commit = value.split(":", 1)
-    branch_name, base_commit = branch_and_commit.rsplit("=", 1)
+    branch_name, base_ref = branch_and_commit.rsplit("=", 1)
     repo_path = repo_path.strip("/")
     branch_name = branch_name.strip()
-    base_commit = base_commit.strip()
-    if not repo_path or not branch_name or not base_commit:
-        raise argparse.ArgumentTypeError("repo path, branch name, and base commit are required")
-    return repo_path, branch_name, base_commit
+    base_ref = base_ref.strip()
+    if not repo_path or not branch_name or not base_ref:
+        raise argparse.ArgumentTypeError("repo path, branch name, and base ref are required")
+    return repo_path, branch_name, base_ref
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -40,7 +40,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         action="append",
         type=parse_repo_branch,
         required=True,
-        metavar="REPO_PATH:BRANCH_NAME=BASE_COMMIT",
+        metavar="REPO_PATH:BRANCH_NAME=BASE_REF",
         help="Repository branch entry. Repeat this option for each branch.",
     )
     return parser.parse_args(argv)
@@ -48,8 +48,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def build_config(args: argparse.Namespace) -> dict:
     repositories: dict[str, list[dict[str, str]]] = {}
-    for repo_path, branch_name, base_commit in args.repo_branch:
-        repositories.setdefault(repo_path, []).append({"name": branch_name, "base_commit": base_commit})
+    for repo_path, branch_name, base_ref in args.repo_branch:
+        repositories.setdefault(repo_path, []).append({"name": branch_name, "base_ref": base_ref})
 
     config = {
         "base_url": args.base_url,
